@@ -1,77 +1,124 @@
-// app/mu-api/session/create/route.ts
+// app/mu-api/session/create/route.ts  ← SO用に改造（MU導線なし）
 import { NextResponse } from 'next/server'
 import { adminAuth } from '@/lib/firebase-admin'
 import { supabaseServer } from '@/lib/supabaseServer'
+import { makeSignedParams } from '@/lib/signed'
+import { randomUUID } from 'crypto'
 
 export const runtime = 'nodejs'
 export const revalidate = 0
 
+// ── SOFIA 固定の環境変数（MU系は一切参照しない） ──
+const SOFIA_UI_URL = (
+  process.env.SOFIA_UI_URL || process.env.NEXT_PUBLIC_SOFIA_UI_URL || 'https://s.muverse.jp'
+).replace(/\/+$/, '')
+
+const SOFIA_SHARED_ACCESS_SECRET = process.env.SOFIA_SHARED_ACCESS_SECRET || ''
+
+function json(status: number, body: any) {
+  return NextResponse.json(body, { status })
+}
+
+function genUserCode() {
+  return 'uc-' + randomUUID().slice(0, 8)
+}
+
 export async function POST(req: Request) {
-  console.log('[MU_LOG] [session/create] API開始')
+  const rid = Math.random().toString(36).slice(2, 8)
+  console.log(`[SO_LOG#${rid}] /session/create start`)
 
   try {
-    const body = await req.json().catch(() => null)
-    console.log('[MU_LOG] 受信データ:', JSON.stringify(body))
+    // 設定チェック
+    if (!SOFIA_SHARED_ACCESS_SECRET) {
+      console.error(`[SO_LOG#${rid}] missing SOFIA_SHARED_ACCESS_SECRET`)
+      return json(500, { ok: false, error: 'SERVER_MISCONFIG' })
+    }
 
-    // idToken または user_code を受け取る
-    const idToken = body?.idToken || body?.auth?.idToken
-    const userCodeFromBody = body?.user_code
+    const body = await req.json().catch(() => null)
+    const idToken: string | undefined = body?.idToken || body?.auth?.idToken
+    const userCodeFromBody: string | undefined = body?.user_code
     const payload = body?.payload || {}
 
     if (!idToken && !userCodeFromBody) {
-      console.error('[MU_LOG] ❌ idToken か user_code が必要')
-      return NextResponse.json({ error: 'idToken or user_code is required' }, { status: 400 })
+      console.warn(`[SO_LOG#${rid}] neither idToken nor user_code provided`)
+      return json(400, { ok: false, error: 'IDTOKEN_OR_USERCODE_REQUIRED' })
     }
 
-    let userCode = userCodeFromBody
+    let user_code = userCodeFromBody || ''
 
-    // idTokenがあればFirebase→Supabaseでuser_code取得
+    // idToken があれば優先して検証 → user_code 解決
     if (idToken) {
-      console.log('[MU_LOG] 🔍 Firebaseトークン検証開始')
+      console.log(`[SO_LOG#${rid}] verifying Firebase idToken…`)
       const decoded = await adminAuth.verifyIdToken(idToken, true)
-      console.log('[MU_LOG] ✅ Firebaseトークン検証OK:', decoded.uid)
+      const uid = decoded.uid
+      console.log(`[SO_LOG#${rid}] uid=`, uid)
 
-      console.log('[MU_LOG] 🔍 Supabaseクエリ開始')
+      // Supabase: firebase_uid → user_code
       const { data, error } = await supabaseServer
         .from('users')
         .select('user_code')
-        .eq('firebase_uid', decoded.uid)
+        .eq('firebase_uid', uid)
         .maybeSingle()
 
       if (error) {
-        console.error('[MU_LOG] ❌ Supabaseエラー:', error.message)
-        return NextResponse.json({ error: error.message }, { status: 500 })
-      }
-      if (!data?.user_code) {
-        console.error('[MU_LOG] ❌ user_code 見つからず')
-        return NextResponse.json({ error: 'User not found' }, { status: 404 })
+        console.error(`[SO_LOG#${rid}] supabase error:`, error.message)
+        return json(500, { ok: false, error: 'DB_ERROR', detail: error.message })
       }
 
-      userCode = data.user_code
+      if (!data?.user_code) {
+        // 必要なら自動プロビジョニング（SO側でやるかは運用次第）
+        console.warn(`[SO_LOG#${rid}] user_code not found → provision new`)
+        const newCode = genUserCode()
+        const ins = await supabaseServer
+          .from('users')
+          .insert({ firebase_uid: uid, user_code: newCode, click_type: 'user', sofia_credit: 0 })
+          .select('user_code')
+          .maybeSingle()
+
+        if (ins.error || !ins.data?.user_code) {
+          console.error(`[SO_LOG#${rid}] provision failed:`, ins.error?.message)
+          return json(500, { ok: false, error: 'USER_PROVISION_FAILED' })
+        }
+        user_code = ins.data.user_code
+      } else {
+        user_code = data.user_code
+      }
     }
 
-    console.log('[MU_LOG] ✅ user_code確定:', userCode)
-    console.log('[MU_LOG] payload:', payload)
+    if (!user_code) {
+      console.warn(`[SO_LOG#${rid}] user_code still empty after processing`)
+      return json(404, { ok: false, error: 'USER_CODE_NOT_FOUND' })
+    }
 
-    // ログインURL生成
-    const loginUrl = `https://m.muverse.jp?user_code=${encodeURIComponent(userCode)}`
-    console.log('[MU_LOG] ✅ ログインURL生成:', loginUrl)
+    // ── 署名付き SOFIA ログインURLを生成（SO 固定 / MU 禁止） ──
+    const { ts, sig } = makeSignedParams(user_code, SOFIA_SHARED_ACCESS_SECRET)
+    const u = new URL(SOFIA_UI_URL)
+    const SOFIA_HOST = u.host
 
-    console.log('[MU_LOG] [session/create] API終了')
-    return NextResponse.json(
-      {
-        status: 'ok',
-        login_url: loginUrl,
-        user_code: userCode,
-        payload
-      },
-      { status: 200 }
-    )
+    u.searchParams.set('user', user_code)
+    u.searchParams.set('ts', String(ts))
+    u.searchParams.set('sig', sig)
+    u.searchParams.set('from', 'so')       // SO発
+    u.searchParams.set('tenant', 'sofia')  // 任意。UI側で利用可
+
+    // 最終ガード：ホストは必ず SOFIA
+    if (u.host !== SOFIA_HOST) {
+      console.error(`[SO_LOG#${rid}] ILLEGAL_TARGET_HOST:`, u.host)
+      return json(500, { ok: false, error: 'ILLEGAL_TARGET_HOST' })
+    }
+
+    const login_url = u.toString()
+    console.log(`[SO_LOG#${rid}] OK ->`, login_url)
+
+    return json(200, {
+      ok: true,
+      tenant: 'sofia',
+      user_code,
+      login_url,
+      payload, // 呼び出し元が付けた任意情報はそのまま返す（必要なら外す）
+    })
   } catch (err: any) {
-    console.error('[MU_LOG] ❌ 例外発生:', err)
-    return NextResponse.json(
-      { error: err?.message || 'Internal Server Error' },
-      { status: 500 }
-    )
+    console.error(`[SO_LOG#${rid}] fatal:`, err)
+    return json(500, { ok: false, error: err?.message || 'INTERNAL' })
   }
 }
