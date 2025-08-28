@@ -39,7 +39,7 @@ const Header: React.FC<IHeaderProps> = ({
 />
 
         <div className="text-white text-sm font-bold tracking-wide font-sofia">
-          共鳴AI-Mu
+          irosAI
         </div>
       </div>
 
