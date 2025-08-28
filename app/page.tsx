@@ -30,11 +30,11 @@ function PageContent() {
         const user = sp.get('user') || ''
 
         if (!user) {
-          muLog('[MU][PAGE] ❌ user param missing')
+          muLog('[SO][PAGE] ❌ user param missing')
           return
         }
 
-        muLog('[MU][PAGE] user_code from query:', user)
+        muLog('[SO][PAGE] user_code from query:', user)
 
         // 直接 sidebar-user を呼ぶ
         const res = await fetch(PROFILE_ENDPOINT, {
@@ -45,7 +45,7 @@ function PageContent() {
         })
 
         const json: any = await res.json().catch(() => ({}))
-        muLog('[MU][PAGE] sidebar-user status/json:', res.status, json)
+        muLog('[SO][PAGE] sidebar-user status/json:', res.status, json)
 
         if (res.ok && json?.ok && json.profile) {
           setUserInfo(json.profile)
@@ -61,7 +61,7 @@ function PageContent() {
         clean.searchParams.delete('sig')
         window.history.replaceState({}, document.title, clean.pathname + (clean.search || ''))
       } catch (e) {
-        muLog('[MU][PAGE] ❌ 例外', e)
+        muLog('[SO][PAGE] ❌ 例外', e)
       } finally {
         setLoading(false)
       }
@@ -72,7 +72,7 @@ function PageContent() {
   if (loading) return <div>ユーザー情報取得中...</div>
   if (!userInfo) return <div>so.認証に失敗しました。</div>
 
-  muLog('[MU][PAGE] ✅ 最終 userInfo =', userInfo)
+  muLog('[SO][PAGE] ✅ 最終 userInfo =', userInfo)
 
   return (
     <main className="h-screen flex flex-col bg-gradient-to-br from-blue-100 to-purple-100">
