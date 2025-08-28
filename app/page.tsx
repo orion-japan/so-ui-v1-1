@@ -70,7 +70,7 @@ function PageContent() {
   }, [])
 
   if (loading) return <div>ユーザー情報取得中...</div>
-  if (!userInfo) return <div>認証に失敗しました。</div>
+  if (!userInfo) return <div>so.認証に失敗しました。</div>
 
   muLog('[MU][PAGE] ✅ 最終 userInfo =', userInfo)
 
