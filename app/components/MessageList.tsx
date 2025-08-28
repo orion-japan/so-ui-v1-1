@@ -65,7 +65,7 @@ const MessageList: FC<MessageListProps> = ({ messages }) => {
               {/* 左アイコン（Sofia） */}
               {!isUserSide && (
                 <img
-                  src="/ir.png"
+                  src="/sofia-icon2.png"
                   alt="Sofia"
                   width={32}
                   height={32}
