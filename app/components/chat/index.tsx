@@ -33,7 +33,7 @@ export default function SofiaChat() {
     <div className="flex flex-col h-full bg-gradient-to-b from-blue-100 via-white to-indigo-100">
       {/* ヘッダー */}
       <div className="flex items-center gap-2 p-4 border-b bg-white shadow-sm">
-        <img src="/mu_logo3.png" alt="Sofia" className="w-6 h-6 rounded-full" />
+        <img src="/ir.png" alt="Sofia" className="w-6 h-6 rounded-full" />
         <h1 className="text-lg font-semibold text-gray-700">Sofiaと響き合う</h1>
       </div>
 

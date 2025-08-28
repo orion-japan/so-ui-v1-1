@@ -33,7 +33,7 @@ const Header: React.FC<IHeaderProps> = ({
       {/* 中央：Sofiaラベル */}
       <div className="flex items-center gap-2">
         <img
-  src="/mu_logo2.png"
+  src="/ir.png"
   className="h-8 w-8 rounded-full filter brightness-125 drop-shadow-sm"
   alt="Sofia"
 />
